@@ -2,12 +2,7 @@ require 'rubygems'
 require 'stringio'
 
 if File.exists?('github.gemspec')
-  stdout, stderr = $stdout, $stderr
-  $stdout, $stderr = StringIO.new, StringIO.new
-  
   spec = eval(File.read('github.gemspec'))
-  
-  $stdout, $stderr = stdout, stderr
   
   spec.runtime_dependencies.each do |dep|
     begin
