@@ -1,3 +1,4 @@
+require 'rubygems'
 require 'fileutils'
 
 if File.exists?('github.gemspec')
