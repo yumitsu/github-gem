@@ -124,7 +124,7 @@ class ConfigTable
   def load_savefile
     begin
       File.foreach(savefile()) do |line|
-        k, v = *line.split(/=/, 2)
+        k, v = *line.split(/\=/, 2)
         self[k] = v.strip
       end
     rescue Errno::ENOENT
@@ -174,17 +174,17 @@ class ConfigTable
     elsif newpath_p
       # 1.4.4 <= V <= 1.6.3
       libruby         = "#{c['prefix']}/lib/ruby"
-      librubyver      = "#{c['prefix']}/lib/ruby/#{version}"
-      librubyverarch  = "#{c['prefix']}/lib/ruby/#{version}/#{c['arch']}"
+      librubyver      = "#{libruby}/#{version}"
+      librubyverarch  = "#{librubyver}/#{c['arch']}"
       siteruby        = c['sitedir']
       siterubyver     = "$siteruby/#{version}"
       siterubyverarch = "$siterubyver/#{c['arch']}"
     else
       # V < 1.4.4
       libruby         = "#{c['prefix']}/lib/ruby"
-      librubyver      = "#{c['prefix']}/lib/ruby/#{version}"
-      librubyverarch  = "#{c['prefix']}/lib/ruby/#{version}/#{c['arch']}"
-      siteruby        = "#{c['prefix']}/lib/ruby/#{version}/site_ruby"
+      librubyver      = "#{libruby}/#{version}"
+      librubyverarch  = "#{librubyver}/#{c['arch']}"
+      siteruby        = "#{libruby}/#{version}/site_ruby"
       siterubyver     = siteruby
       siterubyverarch = "$siterubyver/#{c['arch']}"
     end
@@ -193,13 +193,13 @@ class ConfigTable
     }
 
     if arg = c['configure_args'].split.detect {|arg| /--with-make-prog=/ =~ arg }
-      makeprog = arg.sub(/'/, '').split(/=/, 2)[1]
+      makeprog = arg.sub(/'/, '').split(/\=/, 2)[1]
     else
       makeprog = 'make'
     end
 
     [
-      ExecItem.new('installdirs', 'std/site/home',
+      ExecItem.new('installdirs', 'std/site/home/local',
                    'std: install under libruby; site: install under site_ruby; home: install under $HOME')\
           {|val, table|
             case val
@@ -214,6 +214,12 @@ class ConfigTable
               table['prefix'] = ENV['HOME']
               table['rbdir'] = '$libdir/ruby'
               table['sodir'] = '$libdir/ruby'
+            when 'local'
+              table['libruby'] = '$libdir'
+              table['librubyver'] = '$libruby'
+              table['librubyverarch'] = '$libruby'
+              table['rbdir'] = '$librubyver'
+              table['sodir'] = '$librubyver'
             end
           },
       PathItem.new('prefix', 'path', c['prefix'],
@@ -750,6 +756,8 @@ end
 
 
 class ToplevelInstaller
+  
+  include FileOperations
 
   Version   = '3.4.0'
   Copyright = 'Copyright (c) 2000-2005 Minero Aoki'
@@ -762,7 +770,8 @@ class ToplevelInstaller
     [ 'install',  'installs files' ],
     [ 'test',     'run all tests in test/' ],
     [ 'clean',    "does `make clean' for each extention" ],
-    [ 'distclean',"does `make distclean' for each extention" ]
+    [ 'distclean',"does `make distclean' for each extention" ],
+    [ 'deps', 'installing dependencies' ]
   ]
 
   def ToplevelInstaller.invoke
@@ -781,12 +790,12 @@ class ToplevelInstaller
   def ToplevelInstaller.load_rbconfig
     if arg = ARGV.detect {|arg| /\A--rbconfig=/ =~ arg }
       ARGV.delete(arg)
-      load File.expand_path(arg.split(/=/, 2)[1])
+      load File.expand_path(arg.split(/\=/, 2)[1])
       $".push 'rbconfig.rb'
     else
       require 'rbconfig'
     end
-    ::Config::CONFIG
+    ::RbConfig::CONFIG
   end
 
   def initialize(ardir_root, config)
@@ -936,13 +945,40 @@ class ToplevelInstaller
       when '--no-harm'
         @config.no_harm = true
       when /\A--prefix=/
-        path = a.split(/=/, 2)[1]
+        path = a.split(/\=/, 2)[1]
         path = File.expand_path(path) unless path[0,1] == '/'
         @config.install_prefix = path
       else
         setup_rb_error "install: unknown option #{a}"
       end
     end
+  end
+  
+  def parsearg_deps
+    setup_rb_error "deps: gemspec not provided" if ARGV.empty?
+    
+    @deps, file = [], File.expand_path(ARGV.shift)    
+    setup_rb_error "deps: provided file is not a gemspec manifest" if File.extname(file) != '.gemspec'
+    
+    cont = File.read(file)
+    spec = eval(cont)
+    
+    @deps = spec.runtime_dependencies
+    # spec.runtime_dependencies.each do |dep|
+    #   command("`which gem` install #{dep.name} --no-ri --no-rdoc --version='#{dep.requirement}'")
+    # end
+  end
+  
+  def exec_deps
+    unless @deps.nil?
+      @deps.each do |dep|
+        command("`which gem` install #{dep.name} --no-ri --no-rdoc --version='#{dep.requirement}'")
+      end
+    end
+  end
+  
+  def verbose?
+    false
   end
 
   def print_usage(out)
@@ -1075,7 +1111,7 @@ class ToplevelInstallerMulti < ToplevelInstaller
 
   def print_usage(f)
     super
-    f.puts 'Inluded packages:'
+    f.puts 'Included packages:'
     f.puts '  ' + @packages.sort.join(' ')
     f.puts
   end
@@ -1347,6 +1383,10 @@ class Installer
       setup_rb_error "no ruby extention exists: 'ruby #{$0} setup' first"
     end
     ents
+  end
+  
+  def rubygems
+    
   end
 
   def targetfiles
